@@ -52,7 +52,7 @@ Used by games such as **SingStar, EyeToy, Buzz! Quiz**, etc...
 ## Other options
 
 - `-idx`: Writes a SingStar **.IDX** file alongside the converted **.IPU** file.
-- `-ntsc`: Writes a 30 FPS tag in the **.IPU** header. **Experimental.**
+- `-ntsc`: Writes a 29.97 FPS tag in the **.M2V** header. **Experimental.**
 
 ## Notes
 
