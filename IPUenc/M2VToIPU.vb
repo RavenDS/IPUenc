@@ -120,6 +120,12 @@ Public Module M2VToIPU
                                 curPic = New PictureUnit(MbH)
                                 curPicHasPce = False
 
+                                ' MPEG-1 has no picture_coding_extension so the IPU flag byte = 0
+                                ' MPEG-1 frames must have mp1=1 (bit 7) and all other fields zero
+                                If seqInfo.Mp1 = 1 Then
+                                    curPic.IpuFlag = &H80
+                                End If
+
                                 Console.WriteLine($"M2V to IPU - Frame {frameCount}/{frameCounterOptional}")
 
                             Case &HB5 ' extension_start_code
@@ -231,6 +237,7 @@ Public Module M2VToIPU
 
     ' Shared M2V->IPU macroblock writer (raster order, used by both modes)
     Private Sub WriteIpuFrameMacroblocks(bitw As BitWriter, pic As PictureUnit, seq As SequenceInfo, mbWidth As Integer, mbHeight As Integer)
+        Dim mp1 As Boolean = (seq.Mp1 = 1)
         Dim outDcY As Integer = 0
         Dim outDcCb As Integer = 0
         Dim outDcCr As Integer = 0
@@ -393,7 +400,7 @@ Public Module M2VToIPU
                         Loop
                     Else
                         Do
-                            Dim r As VlcResult = CopyVlcToken(br, bitw)
+                            Dim r As VlcResult = CopyVlcToken(br, bitw, mp1)
                             If r.Kind = VlcKind.EOB Then Exit Do
                             If r.Kind = VlcKind.TokenThenSign Then
                                 Dim signBit As Integer = br.GetBits(1)
@@ -436,6 +443,7 @@ Public Module M2VToIPU
         Dim meta(mbCount - 1) As MBMeta
         Dim br As New SwzBitReader(payload)
 
+        Dim mp1 As Boolean = ((flag And &H80) <> 0)
         Dim dtd As Boolean = ((flag And &H4) <> 0)
         Dim intraVlc As Boolean = ((flag And &H20) <> 0)
 
@@ -507,7 +515,7 @@ Public Module M2VToIPU
                     Loop
                 Else
                     Do
-                        Dim kind As VlcKind = br.SkipVlcToken()
+                        Dim kind As VlcKind = br.SkipVlcToken(mp1)
                         If kind = VlcKind.EOB Then Exit Do
                         If kind = VlcKind.TokenThenSign Then
                             br.SkipBits(1)
@@ -529,6 +537,7 @@ Public Module M2VToIPU
 
         Dim mbCount As Integer = meta.Length
         Dim src As New SwzBitReader(payload)
+        Dim mp1 As Boolean = ((flag And &H80) <> 0)
         Dim dtd As Boolean = ((flag And &H4) <> 0)
         Dim intraVlc As Boolean = ((flag And &H20) <> 0)
 
@@ -637,7 +646,7 @@ Public Module M2VToIPU
                     Loop
                 Else
                     Do
-                        Dim kind As VlcKind = CopySwzVlcToken(src, outBitw)
+                        Dim kind As VlcKind = CopySwzVlcToken(src, outBitw, mp1)
                         If kind = VlcKind.EOB Then Exit Do
                         If kind = VlcKind.TokenThenSign Then
                             Dim s As Integer = src.GetBits(1)
@@ -1032,7 +1041,7 @@ Public Module M2VToIPU
             Return 11
         End Function
 
-        Public Function SkipVlcToken() As VlcKind
+        Public Function SkipVlcToken(mp1 As Boolean) As VlcKind
             Dim bits2 As Integer = GetBits(2)
             If bits2 = 2 Then Return VlcKind.EOB
             If bits2 = 3 Then Return VlcKind.TokenThenSign
@@ -1056,7 +1065,15 @@ Public Module M2VToIPU
                     Return VlcKind.TokenThenSign
                 End If
                 If t3 = 1 Then
-                    GetBits(18)
+                    If mp1 Then
+                        ' MPEG-1 escape (ISO/IEC 11172-2): 6-bit run + 8-bit level
+                        ' If level is 0x00 or 0x80 (sign+zero), read 8 more bits for the real level (level extension)
+                        GetBits(6)
+                        Dim lvl As Integer = GetBits(8)
+                        If lvl = 0 OrElse lvl = &H80 Then GetBits(8)
+                    Else
+                        GetBits(18)
+                    End If
                     Return VlcKind.Escape
                 End If
 
@@ -1148,7 +1165,7 @@ Public Module M2VToIPU
     End Structure
 
     ' VLC copier: BitReader -> BitWriter (used for raster-order pass)
-    Private Function CopyVlcToken(br As BitReader, bw As BitWriter) As VlcResult
+    Private Function CopyVlcToken(br As BitReader, bw As BitWriter, mp1 As Boolean) As VlcResult
         Dim bits2 As Integer = br.GetBits(2)
         bw.PutBits(CUInt(bits2), 2)
 
@@ -1186,8 +1203,21 @@ Public Module M2VToIPU
                 Return New VlcResult With {.Kind = VlcKind.TokenThenSign}
             End If
             If t3 = 1 Then
-                Dim esc As Integer = br.GetBits(18)
-                bw.PutBits(CUInt(esc), 18)
+                If mp1 Then
+                    ' MPEG-1 escape (ISO/IEC 11172-2): 6-bit run + 8-bit level
+                    ' If level is 0x00 or 0x80, read 8 more bits (level extension)
+                    Dim run As Integer = br.GetBits(6)
+                    bw.PutBits(CUInt(run), 6)
+                    Dim lvl As Integer = br.GetBits(8)
+                    bw.PutBits(CUInt(lvl), 8)
+                    If lvl = 0 OrElse lvl = &H80 Then
+                        Dim ext As Integer = br.GetBits(8)
+                        bw.PutBits(CUInt(ext), 8)
+                    End If
+                Else
+                    Dim esc As Integer = br.GetBits(18)
+                    bw.PutBits(CUInt(esc), 18)
+                End If
                 Return New VlcResult With {.Kind = VlcKind.Escape}
             End If
 
@@ -1217,7 +1247,7 @@ Public Module M2VToIPU
     End Function
 
     ' VLC copier: SwzBitReader -> BitWriter (used for swizzle pass)
-    Private Function CopySwzVlcToken(br As SwzBitReader, bw As BitWriter) As VlcKind
+    Private Function CopySwzVlcToken(br As SwzBitReader, bw As BitWriter, mp1 As Boolean) As VlcKind
         Dim bits2 As Integer = br.GetBits(2)
         bw.PutBits(CUInt(bits2), 2)
 
@@ -1255,8 +1285,21 @@ Public Module M2VToIPU
                 Return VlcKind.TokenThenSign
             End If
             If t3 = 1 Then
-                Dim esc As Integer = br.GetBits(18)
-                bw.PutBits(CUInt(esc), 18)
+                If mp1 Then
+                    ' MPEG-1 escape (ISO/IEC 11172-2): 6-bit run + 8-bit level.
+                    ' If level is 0x00 or 0x80, read 8 more bits (level extension).
+                    Dim run As Integer = br.GetBits(6)
+                    bw.PutBits(CUInt(run), 6)
+                    Dim lvl As Integer = br.GetBits(8)
+                    bw.PutBits(CUInt(lvl), 8)
+                    If lvl = 0 OrElse lvl = &H80 Then
+                        Dim ext As Integer = br.GetBits(8)
+                        bw.PutBits(CUInt(ext), 8)
+                    End If
+                Else
+                    Dim esc As Integer = br.GetBits(18)
+                    bw.PutBits(CUInt(esc), 18)
+                End If
                 Return VlcKind.Escape
             End If
 
