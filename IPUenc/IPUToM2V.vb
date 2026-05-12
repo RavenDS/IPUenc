@@ -6,7 +6,7 @@ Imports System.IO
 
 ' IPUtoM2V - github.com/ravenDS/IPUenc
 
-' IPU (ipum) -> M2V (MPEG-2 I-picture only)
+' IPU (ipum) -> M2V/M1V (I-picture only)
 
 ' Mode 1 = raster order (v1, The Getaway...)
 ' Mode 2 = column-major swizzle (v2, SingStar, EyeToy, Buzz! Quiz..)
@@ -14,7 +14,7 @@ Imports System.IO
 Public Module IPUToM2V
 
     ''' <summary>
-    ''' Converts an IPU file back to M2V (MPEG-2 I-picture only).
+    ''' Converts an IPU file back to M2V/M1V (I-picture only).
     ''' </summary>
     ''' <param name="mode">1 = raster order (v1), 2 = column-major swizzle (v2)</param>
     Public Sub ConvertIPUToM2v(inputPath As String, outputPath As String, mode As Integer, Optional pal As Boolean = True)
@@ -335,6 +335,9 @@ Public Module IPUToM2V
 
                 Dim intraVlc As Boolean = ((flag And 32) <> 0)
 
+                ' bit7=mp1 (0=mpeg2 escape codes, 1=mpeg1 escape codes per ISO/IEC 11172-2)
+                Dim mp1 As Boolean = ((flag And 128) <> 0)
+
                 ' Write M2V headers (first frame only for sequence header)
                 If frame = 0 Then
                     ' Sequence header (00 00 01 B3)
@@ -470,7 +473,7 @@ Public Module IPUToM2V
                             Loop While eob <> 1
                         Else
                             Do
-                                eob = Vlc(writeOutput:=False)
+                                eob = Vlc(writeOutput:=False, mp1:=mp1)
                                 If eob = 0 Then infile.Get(1)
                             Loop While eob <> 1
                         End If
@@ -639,7 +642,7 @@ Public Module IPUToM2V
                                 Loop While eob <> 1
                             Else
                                 Do
-                                    eob = Vlc(writeOutput:=True)
+                                    eob = Vlc(writeOutput:=True, mp1:=mp1)
                                     If eob = 0 Then outfile.PutBits(infile.Get(1), 1) ' sign bit
                                 Loop While eob <> 1
                             End If
@@ -661,7 +664,7 @@ Public Module IPUToM2V
         End Sub
 
         ' VLC decoder/copier
-        Private Function Vlc(writeOutput As Boolean) As Integer
+        Private Function Vlc(writeOutput As Boolean, mp1 As Boolean) As Integer
             Dim bits As UInteger
             Dim level As Integer = 0
 
@@ -706,8 +709,22 @@ Public Module IPUToM2V
                 End If
 
                 If bits = 1UI Then
-                    bits = infile.Get(18)
-                    If writeOutput Then outfile.PutBits(bits, 18)
+                    If mp1 Then
+                        ' MPEG-1 escape payload (ISO/IEC 11172-2):
+                        '   6-bit run, 8-bit signed level, optional 8-bit level extension when the first level byte is 0x00 or 0x80
+                        Dim runBits As UInteger = infile.Get(6)
+                        If writeOutput Then outfile.PutBits(runBits, 6)
+                        Dim lev As UInteger = infile.Get(8)
+                        If writeOutput Then outfile.PutBits(lev, 8)
+                        If lev = 0UI OrElse lev = &H80UI Then
+                            Dim levExt As UInteger = infile.Get(8)
+                            If writeOutput Then outfile.PutBits(levExt, 8)
+                        End If
+                    Else
+                        ' MPEG-2 escape payload: fixed 6-bit run + 12-bit signed level = 18 bits
+                        bits = infile.Get(18)
+                        If writeOutput Then outfile.PutBits(bits, 18)
+                    End If
                     Return 2 ' escape
                 End If
 

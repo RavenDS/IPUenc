@@ -1,6 +1,8 @@
 ﻿Module Program
+
     ' IPUenc by ravenDS
     ' github.com/ravenDS
+
     Sub Main(args As String())
         If args.Length = 0 Then
             PrintUsage()
@@ -53,7 +55,7 @@
         If action Is Nothing Then
             Dim ext = IO.Path.GetExtension(inputFile).ToLower()
             Select Case ext
-                Case ".m2v"
+                Case ".m2v", ".m1v"
                     action = "encode"
                 Case ".ipu"
                     action = "decode"
@@ -63,12 +65,17 @@
             End Select
         End If
 
-        ' If no output specified generate from input
+
+        ' (mp1 is decided from the bitstream content)
+        ' for decode we check the first frame flag to pick .m1v or .m2v so the filename matches what the bitstream actually is
+        ' user can still pass any output path they want
+
         If outputFile Is Nothing Then
             If action = "encode" Then
                 outputFile = IO.Path.ChangeExtension(inputFile, ".ipu")
             Else
-                outputFile = IO.Path.ChangeExtension(inputFile, ".m2v")
+                Dim outExt As String = If(CheckIPUMp1(inputFile), ".m1v", ".m2v")
+                outputFile = IO.Path.ChangeExtension(inputFile, outExt)
             End If
         End If
 
@@ -109,10 +116,14 @@
         Console.WriteLine("Modes:")
         Console.WriteLine("  -encode / -decode    Action (auto-detected from extension)")
         Console.WriteLine("  -mode1 / -mode2      Mode 1: Raster order (The Getaway..)")
-        Console.WriteLine("                       Mode 2: Column-major (SingStar, EyeToy, Buzz! Quiz..) (DEFAULT)")
+        Console.WriteLine("                       Mode 2: Column-major (SingStar, EyeToy, Buzz!) (DEFAULT)")
         Console.WriteLine("Options:")
         Console.WriteLine("  -idx                 Create IDX file when encoding to IPU")
-        Console.WriteLine("  -ntsc                Write 30 FPS flag to M2V (EXPERIMENTAL!)")
+        Console.WriteLine("  -ntsc                Write 29.97 FPS flag to M2V (EXPERIMENTAL!)")
+        Console.WriteLine()
+        Console.WriteLine("Notes:")
+        Console.WriteLine("  - On decode, the default output extension is chosen from the IPU mp1")
+        Console.WriteLine("    flag: .m1v for MPEG-1, .m2v for MPEG-2. Override by passing a path.")
         Console.WriteLine()
         Console.WriteLine("Examples:")
         Console.WriteLine("  IPUenc -encode -mode1 -idx ""input.m2v"" ""output.ipu""")
@@ -128,7 +139,7 @@
         Console.WriteLine("  ██ ██      ██    ██  █    █  █ █   ")
         Console.WriteLine("  ██ ██       ██████   ▀▀▀▀ ▀  ▀  ▀▀▀")
         Console.WriteLine()
-        Console.WriteLine("  PS2 IPU/M2V Converter - v1.0")
+        Console.WriteLine("  PS2 IPU/M2V Converter - v1.1")
         Console.WriteLine("  github.com/ravenDS/IPUenc")
         Console.WriteLine()
     End Sub

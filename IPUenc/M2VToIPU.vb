@@ -6,18 +6,18 @@ Imports System.IO
 
 ' M2VtoIPU - github.com/ravenDS/IPUenc
 
-' M2V (MPEG-2 I-picture only) -> IPU (ipum)
+' M2V/M1V (MPEG-1/MPEG-2 I-picture only) -> IPU (ipum)
 ' Supports any resolution (dimensions must be multiples of 16)
 
 ' Mode 1 = raster order (v1, The Getaway...)
 ' Mode 2 = column-major order (v2, SingStar, EyeToy, Buzz! Quiz...)
 
-' (MPEG2 I-only, MBAI=1 only)
+' (I-only, MBAI=1 only)
 
 Public Module M2VToIPU
 
     ''' <summary>
-    ''' Converts an M2V (MPEG-2 I-picture only) file to IPU format.
+    ''' Converts an M2V/M1V (MPEG-1/MPEG-2 I-picture only) file to IPU format.
     ''' </summary>
     ''' <param name="mode">1 = standard raster order (v1), 2 = column-major order (v2)</param>
     Public Sub ConvertM2VToIPU(inputM2V As String, outputIPU As String, mode As Integer)

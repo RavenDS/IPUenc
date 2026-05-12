@@ -131,4 +131,20 @@ Module Helpers
         End Using
 
     End Sub
+
+    Public Function CheckIPUMp1(ipuPath As String) As Boolean
+        Try
+            Using fs As New FileStream(ipuPath, FileMode.Open, FileAccess.Read, FileShare.Read)
+                ' IPU layout: 'ipum'(4) + datasize(4) + width(2) + height(2) + nframes(4) = 16 bytes
+                ' then frame 0 flag byte at offset 16
+                If fs.Length < 17 Then Return False
+                fs.Position = 16
+                Dim flagByte As Integer = fs.ReadByte()
+                If flagByte < 0 Then Return False
+                Return (flagByte And &H80) <> 0
+            End Using
+        Catch
+            Return False
+        End Try
+    End Function
 End Module
