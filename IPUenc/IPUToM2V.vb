@@ -378,21 +378,24 @@ Public Module IPUToM2V
                     End If
                 End If
 
-                ' GOP header (00 00 01 B8)
-                Dim fps As Integer = If(pal, 25, 30)
-                outfile.PutBits(&H1B8UI, 32)
-                outfile.PutBits(0UI, 1)         ' drop_frame_flag
-                outfile.PutBits(CUInt((frame \ fps \ 60 \ 60) And &H1F), 5)    ' hours
-                outfile.PutBits(CUInt(((frame Mod (fps * 60 * 60)) \ fps \ 60) And &H3F), 6) ' minutes
-                outfile.PutBits(1UI, 1)         ' marker
-                outfile.PutBits(CUInt(((frame Mod (fps * 60)) \ fps) And &H3F), 6)  ' seconds
-                outfile.PutBits(CUInt((frame Mod fps) And &H3F), 6) ' pictures
-                outfile.PutBits(1UI, 1)         ' closed_gop
-                outfile.PutBits(0UI, 6)         ' broken_link + padding
+                ' GOP layout
+                ' one GOP header every gopSize pictures (default 1 second of video) instead of one per picture
+                ' each picture temporal_reference then increments within GOP
+
+                ' let demuxers compute presentation timestamps this way:
+                '  PTS = GOP_time_code + temporal_reference / frame_rate
+
+                Dim gopSize As Integer = If(pal, 25, 30)   ' ~1 second per GOP
+                Dim trInGop As Integer = frame Mod gopSize
+
+                ' GOP header at every GOP boundary (frame 0, gopSize, 2*gopSize, ...)
+                If trInGop = 0 Then
+                    WriteGopHeader(frame, pal)
+                End If
 
                 ' Picture header (00 00 01 00)
                 outfile.PutBits(&H100UI, 32)
-                outfile.PutBits(0UI, 10)        ' temporal_reference
+                outfile.PutBits(CUInt(trInGop And &H3FF), 10)   ' temporal_reference within GOP
                 outfile.PutBits(1UI, 3)         ' picture_coding_type = I
                 outfile.PutBits(&HFFFFUI, 16)   ' vbv_delay
                 outfile.PutBits(0UI, 3)         ' extra bits
@@ -661,6 +664,58 @@ Public Module IPUToM2V
 
             ' Sequence end code
             outfile.PutBits(&H1B7UI, 32)
+        End Sub
+
+        Private Sub ComputeGopTimecode(frameIndex As Integer, pal As Boolean,
+                                       ByRef hours As Integer, ByRef minutes As Integer,
+                                       ByRef seconds As Integer, ByRef pictures As Integer,
+                                       ByRef dropFrameFlag As Integer)
+            If pal Then
+                ' 25 fps is exact, drop_frame_flag is reserved for 29.97/59.94
+                dropFrameFlag = 0
+                hours = frameIndex \ 25 \ 60 \ 60
+                minutes = (frameIndex \ 25 \ 60) Mod 60
+                seconds = (frameIndex \ 25) Mod 60
+                pictures = frameIndex Mod 25
+            Else
+                ' SMPTE 12M drop-frame for 29.97 fps
+                ' 10 minutes of drop-frame = 17982 actual frames (18000 - 18 drops)
+                '  1 minute of drop-frame  =  1798 actual frames (1800 - 2 drops) except every 10th minute which is the full 1800
+
+                ' the formula converts an actual frame count N to the displayed timecode position by inserting the drops back in
+
+                dropFrameFlag = 1
+                Dim N As Integer = frameIndex
+                Dim D As Integer = N \ 17982          ' complete 10-minute blocks
+                Dim M As Integer = N Mod 17982        ' frames within current 10-min block
+                Dim displayed As Integer
+                If M > 1 Then
+                    displayed = N + 18 * D + 2 * ((M - 2) \ 1798)
+                Else
+                    displayed = N + 18 * D
+                End If
+                pictures = displayed Mod 30
+                Dim secTotal As Integer = displayed \ 30
+                seconds = secTotal Mod 60
+                Dim minTotal As Integer = secTotal \ 60
+                minutes = minTotal Mod 60
+                hours = minTotal \ 60
+            End If
+        End Sub
+
+        Private Sub WriteGopHeader(frameIndex As Integer, pal As Boolean)
+            Dim h As Integer, m As Integer, s As Integer, p As Integer, df As Integer
+            ComputeGopTimecode(frameIndex, pal, h, m, s, p, df)
+
+            outfile.PutBits(&H1B8UI, 32)            ' group_start_code
+            outfile.PutBits(CUInt(df), 1)            ' drop_frame_flag
+            outfile.PutBits(CUInt(h And &H1F), 5)    ' hours
+            outfile.PutBits(CUInt(m And &H3F), 6)    ' minutes
+            outfile.PutBits(1UI, 1)                  ' marker_bit
+            outfile.PutBits(CUInt(s And &H3F), 6)    ' seconds
+            outfile.PutBits(CUInt(p And &H3F), 6)    ' pictures (within second)
+            outfile.PutBits(1UI, 1)                  ' closed_gop = 1 (I-only, no external refs)
+            outfile.PutBits(0UI, 6)                  ' broken_link (1 bit) + reserved (5 bits)
         End Sub
 
         ' VLC decoder/copier
