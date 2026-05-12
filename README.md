@@ -2,11 +2,13 @@
 
 **IPUenc** is an open-source video converter for PlayStation 2 **.IPU** video files.
 
-The main input/output format is **M2V** (MPEG-2 video). Intra VLC is handled automatically.
+The main input/output format is **.M2V** _(MPEG-2 video)_. 
+
+**.M1V** _(MPEG-1 video)_ is also supported. 
 
 ## Requirements
 
-**[.NET 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)** - Supported platforms: Windows, macOS, and Linux.
+**[.NET 8.0](https://dotnet.microsoft.com/download/dotnet/8.0)** (or higher) - Supported platforms: **Windows, macOS, and Linux**.
 
 ## Supported conversions
 
